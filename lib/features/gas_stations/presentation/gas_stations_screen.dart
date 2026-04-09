@@ -459,7 +459,11 @@ class _GasStationsScreenState extends State<GasStationsScreen> {
         ),
       _Status.loaded => _state.stations.isEmpty
           ? _EmptyView(onRetry: _load)
-          : _StationList(stations: _state.stations),
+          : _StationList(
+              stations: _state.stations,
+              userLat: _state.userPosition?.latitude,
+              userLng: _state.userPosition?.longitude,
+            ),
     };
   }
 }
@@ -667,23 +671,51 @@ class _PriceSummaryBar extends StatelessWidget {
 
 class _StationList extends StatelessWidget {
   final List<GasStation> stations;
-  const _StationList({required this.stations});
+  final double? userLat;
+  final double? userLng;
 
-  double get _lowestRegular => stations
-      .where((s) => s.fuelPrices.regular != null)
-      .map((s) => s.fuelPrices.regular!)
-      .reduce(math.min);
+  const _StationList({
+    required this.stations,
+    this.userLat,
+    this.userLng,
+  });
+
+  String? _badgeFor(GasStation station) {
+    if (stations.isEmpty) return null;
+
+    final withPrices = stations.where((s) => s.fuelPrices.regular != null).toList();
+    final withRatings = stations.where((s) => s.rating != null).toList();
+
+    final lowestPrice  = withPrices.isEmpty ? null : withPrices.map((s) => s.fuelPrices.regular!).reduce(math.min);
+    final highestPrice = withPrices.isEmpty ? null : withPrices.map((s) => s.fuelPrices.regular!).reduce(math.max);
+    final closestDist  = stations.map((s) => s.distance).reduce(math.min);
+    final highestRating = withRatings.isEmpty ? null : withRatings.map((s) => s.rating!).reduce(math.max);
+
+    if (lowestPrice != null && station.fuelPrices.regular == lowestPrice) return 'Cheapest';
+    if (station.distance == closestDist) return 'Closest';
+    if (highestRating != null && station.rating == highestRating) return 'Highest Rated';
+    if (highestPrice != null && station.fuelPrices.regular == highestPrice) return 'Most Expensive';
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final cheapest = _lowestRegular;
+    final withPrices = stations.where((s) => s.fuelPrices.regular != null).toList();
+    final cheapest = withPrices.isEmpty ? null : withPrices.map((s) => s.fuelPrices.regular!).reduce(math.min);
+
     return ListView.builder(
       padding: const EdgeInsets.only(bottom: 24),
       itemCount: stations.length,
       itemBuilder: (context, index) {
         final station = stations[index];
-        final isCheapest = station.fuelPrices.regular == cheapest;
-        return _StationCard(station: station, isCheapest: isCheapest);
+        final isCheapest = station.fuelPrices.regular != null && station.fuelPrices.regular == cheapest;
+        return _StationCard(
+          station: station,
+          isCheapest: isCheapest,
+          badge: _badgeFor(station),
+          userLat: userLat,
+          userLng: userLng,
+        );
       },
     );
   }
@@ -696,8 +728,17 @@ class _StationList extends StatelessWidget {
 class _StationCard extends StatelessWidget {
   final GasStation station;
   final bool isCheapest;
+  final String? badge;
+  final double? userLat;
+  final double? userLng;
 
-  const _StationCard({required this.station, this.isCheapest = false});
+  const _StationCard({
+    required this.station,
+    this.isCheapest = false,
+    this.badge,
+    this.userLat,
+    this.userLng,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -802,6 +843,10 @@ class _StationCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
+                      if (badge != null) ...[
+                        const SizedBox(height: 5),
+                        _BadgeLabel(label: badge!),
+                      ],
                     ],
                   ),
                 ),
@@ -843,12 +888,53 @@ class _StationCard extends StatelessWidget {
                   lat: station.lat,
                   lng: station.lng,
                   name: station.name,
+                  userLat: userLat,
+                  userLng: userLng,
                 ),
               ],
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BADGE LABEL  (Cheapest / Closest / Highest Rated / Most Expensive)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BadgeLabel extends StatelessWidget {
+  final String label;
+  const _BadgeLabel({required this.label});
+
+  // Each badge has its own colour scheme
+  static const _styles = {
+    'Cheapest':       (bg: Color(0xFFE3F2FD), fg: Color(0xFF1565C0), icon: Icons.local_offer),
+    'Closest':        (bg: Color(0xFFE8F5E9), fg: Color(0xFF2E7D32), icon: Icons.near_me),
+    'Highest Rated':  (bg: Color(0xFFFFF8E1), fg: Color(0xFFF57F17), icon: Icons.star),
+    'Most Expensive': (bg: Color(0xFFFFEBEE), fg: Color(0xFFC62828), icon: Icons.trending_up),
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final style = _styles[label];
+    if (style == null) return const SizedBox.shrink();
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(style.icon, size: 11, color: style.fg),
+        const SizedBox(width: 3),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: style.fg,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -861,25 +947,34 @@ class _DirectionsButton extends StatelessWidget {
   final double lat;
   final double lng;
   final String name;
+  final double? userLat;
+  final double? userLng;
 
   const _DirectionsButton({
     required this.lat,
     required this.lng,
     required this.name,
+    this.userLat,
+    this.userLng,
   });
 
   Future<void> _openMaps() async {
-    // Apple Maps (works on iOS and macOS)
+    final hasOrigin = userLat != null && userLng != null;
+
+    // Apple Maps — saddr=origin, daddr=destination, dirflg=d (driving)
     final appleUrl = Uri.parse(
-      'https://maps.apple.com/?daddr=$lat,$lng&dirflg=d&t=m',
+      hasOrigin
+          ? 'https://maps.apple.com/?saddr=$userLat,$userLng&daddr=$lat,$lng&dirflg=d&t=m'
+          : 'https://maps.apple.com/?daddr=$lat,$lng&dirflg=d&t=m',
     );
 
-    // Google Maps fallback (Android, web, Windows)
+    // Google Maps — origin + destination for driving
     final googleUrl = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
+      hasOrigin
+          ? 'https://www.google.com/maps/dir/?api=1&origin=$userLat,$userLng&destination=$lat,$lng&travelmode=driving'
+          : 'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
     );
 
-    // Try Apple Maps first, fall back to Google Maps
     if (await canLaunchUrl(appleUrl)) {
       await launchUrl(appleUrl, mode: LaunchMode.externalApplication);
     } else {
