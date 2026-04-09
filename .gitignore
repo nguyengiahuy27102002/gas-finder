@@ -1,0 +1,31 @@
+# Environment variables — NEVER commit these
+.env
+.env.local
+.env.production
+backend/.env
+
+# Node / NestJS
+node_modules/
+backend/node_modules/
+backend/dist/
+npm-debug.log*
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+*.g.dart
+*.freezed.dart
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db

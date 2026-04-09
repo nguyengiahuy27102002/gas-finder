@@ -1,0 +1,27 @@
+name: gas_finder_app
+description: DashMateAI — Nearby Gas Stations
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # GPS / location
+  geolocator: ^11.0.0
+
+  # HTTP calls to backend
+  http: ^1.2.1
+
+  cupertino_icons: ^1.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
