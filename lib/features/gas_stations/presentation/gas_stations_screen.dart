@@ -156,30 +156,53 @@ class GasStationRepository {
 
 class LocationService {
   /// Returns the user's current position.
-  /// Throws a descriptive [Exception] if permission is denied or services off.
+  /// On web: browser will prompt for location permission.
+  /// On mobile: uses GPS with full permission flow.
+  /// Falls back to Miami coords if location is unavailable.
   Future<Position> getCurrentPosition() async {
-    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      throw Exception(
-          'Location services are disabled. Enable them in device Settings.');
-    }
-
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        throw Exception('Location permission denied.');
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        // Fall back to a default location so the app still shows stations
+        return _fallbackPosition();
       }
-    }
-    if (permission == LocationPermission.deniedForever) {
-      throw Exception(
-          'Location permission permanently denied. Open app Settings to allow.');
-    }
 
-    return Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.high,
-    );
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          return _fallbackPosition();
+        }
+      }
+      if (permission == LocationPermission.deniedForever) {
+        return _fallbackPosition();
+      }
+
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      ).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => _fallbackPosition(),
+      );
+    } catch (_) {
+      return _fallbackPosition();
+    }
   }
+
+  /// Default coordinates (Miami, FL) used when GPS is unavailable.
+  /// Replace with your own city's coords if needed.
+  Position _fallbackPosition() => Position(
+        latitude: 25.7617,
+        longitude: -80.1918,
+        timestamp: DateTime.now(),
+        accuracy: 0,
+        altitude: 0,
+        altitudeAccuracy: 0,
+        heading: 0,
+        headingAccuracy: 0,
+        speed: 0,
+        speedAccuracy: 0,
+      );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -193,12 +216,14 @@ class _ScreenState {
   final List<GasStation> stations;
   final String? errorMessage;
   final Position? userPosition;
+  final bool usingFallbackLocation;
 
   const _ScreenState({
     required this.status,
     this.stations = const [],
     this.errorMessage,
     this.userPosition,
+    this.usingFallbackLocation = false,
   });
 
   _ScreenState copyWith({
@@ -206,12 +231,15 @@ class _ScreenState {
     List<GasStation>? stations,
     String? errorMessage,
     Position? userPosition,
+    bool? usingFallbackLocation,
   }) =>
       _ScreenState(
         status: status ?? this.status,
         stations: stations ?? this.stations,
         errorMessage: errorMessage ?? this.errorMessage,
         userPosition: userPosition ?? this.userPosition,
+        usingFallbackLocation:
+            usingFallbackLocation ?? this.usingFallbackLocation,
       );
 }
 
@@ -249,21 +277,22 @@ class _GasStationsScreenState extends State<GasStationsScreen> {
     setState(() => _state = _state.copyWith(status: _Status.loading));
 
     try {
-      // 1. Check backend is reachable before asking for GPS
+      // 1. Get position (falls back to Miami if GPS unavailable)
+      final position = await _location.getCurrentPosition();
+      final isFallback = position.accuracy == 0;
+
+      // 2. Check backend is reachable
       final reachable = await _repo.isBackendReachable();
       if (!reachable) {
         throw Exception(
           'Backend is offline.\n\n'
-          'Run this in your terminal:\n'
-          'cd backend && npm run start:dev\n\n'
-          'Backend URL: $_kBackendBase',
+          'Run in a terminal:\n'
+          'cd backend\nnpm run start:dev\n\n'
+          'URL: $_kBackendBase',
         );
       }
 
-      // 2. Get GPS
-      final position = await _location.getCurrentPosition();
-
-      // 3. Fetch real stations from backend
+      // 3. Fetch real stations
       final stations = await _repo.getNearby(
         lat: position.latitude,
         lng: position.longitude,
@@ -273,6 +302,7 @@ class _GasStationsScreenState extends State<GasStationsScreen> {
             status: _Status.loaded,
             stations: stations,
             userPosition: position,
+            usingFallbackLocation: isFallback,
           ));
     } catch (e) {
       setState(() => _state = _state.copyWith(
@@ -310,6 +340,27 @@ class _GasStationsScreenState extends State<GasStationsScreen> {
           children: [
             _buildAppBar(),
             _SearchBar(controller: _searchController),
+            if (_state.usingFallbackLocation)
+              Container(
+                width: double.infinity,
+                color: const Color(0xFFFFF8E1),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: Row(
+                  children: [
+                    const Icon(Icons.location_off,
+                        size: 14, color: Color(0xFFF57F17)),
+                    const SizedBox(width: 6),
+                    const Expanded(
+                      child: Text(
+                        'Using default location (Miami, FL). Allow location for nearby results.',
+                        style: TextStyle(
+                            fontSize: 11, color: Color(0xFFF57F17)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             if (_state.status == _Status.loaded && _state.stations.isNotEmpty)
               _PriceSummaryBar(
                 lowest: _lowestPrice,
