@@ -5,12 +5,15 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CONFIG — change this to your machine's IP when running on a physical device
+// CONFIG
 // ─────────────────────────────────────────────────────────────────────────────
+// Your machine's local IP: 10.1.10.139 (detected automatically)
+//
+// Uncomment the line that matches where you're running the app:
 
-const String _kBackendBase = 'http://10.0.2.2:3000/api'; // Android emulator
-// const String _kBackendBase = 'http://localhost:3000/api'; // iOS simulator
-// const String _kBackendBase = 'http://192.168.x.x:3000/api'; // physical device
+// const String _kBackendBase = 'http://10.0.2.2:3000/api';      // Android emulator
+// const String _kBackendBase = 'http://localhost:3000/api';      // iOS simulator
+const String _kBackendBase = 'http://10.1.10.139:3000/api';       // Physical device (WiFi)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MODEL
@@ -110,11 +113,22 @@ class GasStationRepository {
       },
     );
 
-    final response = await http.get(uri).timeout(const Duration(seconds: 15));
+    final http.Response response;
+    try {
+      response = await http.get(uri).timeout(const Duration(seconds: 15));
+    } on Exception catch (e) {
+      // Connection refused, timeout, no network, etc.
+      throw Exception(
+        'Cannot reach backend at $_kBackendBase.\n'
+        'Make sure the NestJS server is running:\n'
+        '  cd backend && npm run start:dev\n\n'
+        'Original error: $e',
+      );
+    }
 
     if (response.statusCode != 200) {
-      final body = jsonDecode(response.body);
-      throw Exception(body['message'] ?? 'Failed to load gas stations');
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      throw Exception(body['message'] ?? 'Server error ${response.statusCode}');
     }
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -122,6 +136,17 @@ class GasStationRepository {
     return list
         .map((e) => GasStation.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// Quick ping to verify the backend is reachable before fetching data.
+  Future<bool> isBackendReachable() async {
+    try {
+      final uri = Uri.parse('$_kBackendBase/gas-stations/health');
+      final response = await http.get(uri).timeout(const Duration(seconds: 5));
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
   }
 }
 
@@ -224,11 +249,26 @@ class _GasStationsScreenState extends State<GasStationsScreen> {
     setState(() => _state = _state.copyWith(status: _Status.loading));
 
     try {
+      // 1. Check backend is reachable before asking for GPS
+      final reachable = await _repo.isBackendReachable();
+      if (!reachable) {
+        throw Exception(
+          'Backend is offline.\n\n'
+          'Run this in your terminal:\n'
+          'cd backend && npm run start:dev\n\n'
+          'Backend URL: $_kBackendBase',
+        );
+      }
+
+      // 2. Get GPS
       final position = await _location.getCurrentPosition();
+
+      // 3. Fetch real stations from backend
       final stations = await _repo.getNearby(
         lat: position.latitude,
         lng: position.longitude,
       );
+
       setState(() => _state = _ScreenState(
             status: _Status.loaded,
             stations: stations,
