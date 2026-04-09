@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -340,7 +342,20 @@ class _GasStationsScreenState extends State<GasStationsScreen> {
         child: Column(
           children: [
             _buildAppBar(),
-            _SearchBar(controller: _searchController),
+            _SearchBar(
+              controller: _searchController,
+              onMapTap: _state.status == _Status.loaded && _state.stations.isNotEmpty
+                  ? () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => GasStationMapScreen(
+                            stations: _state.stations,
+                            userLat: _state.userPosition?.latitude ?? 25.7617,
+                            userLng: _state.userPosition?.longitude ?? -80.1918,
+                          ),
+                        ),
+                      )
+                  : null,
+            ),
             if (_state.usingFallbackLocation)
               Container(
                 width: double.infinity,
@@ -474,7 +489,8 @@ class _GasStationsScreenState extends State<GasStationsScreen> {
 
 class _SearchBar extends StatelessWidget {
   final TextEditingController controller;
-  const _SearchBar({required this.controller});
+  final VoidCallback? onMapTap;
+  const _SearchBar({required this.controller, this.onMapTap});
 
   @override
   Widget build(BuildContext context) {
@@ -515,8 +531,11 @@ class _SearchBar extends StatelessWidget {
             ),
             Container(width: 1, height: 24, color: Colors.grey[200]),
             const SizedBox(width: 12),
-            const Icon(Icons.map_outlined,
-                color: Color(0xFF2196F3), size: 22),
+            GestureDetector(
+              onTap: onMapTap,
+              child: const Icon(Icons.map_outlined,
+                  color: Color(0xFF2196F3), size: 22),
+            ),
             const SizedBox(width: 14),
           ],
         ),
@@ -1342,6 +1361,585 @@ class _EmptyView extends StatelessWidget {
             icon: const Icon(Icons.refresh),
             label: const Text('Refresh'),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAP SCREEN
+// ─────────────────────────────────────────────────────────────────────────────
+
+class GasStationMapScreen extends StatefulWidget {
+  final List<GasStation> stations;
+  final double userLat;
+  final double userLng;
+
+  const GasStationMapScreen({
+    super.key,
+    required this.stations,
+    required this.userLat,
+    required this.userLng,
+  });
+
+  @override
+  State<GasStationMapScreen> createState() => _GasStationMapScreenState();
+}
+
+class _GasStationMapScreenState extends State<GasStationMapScreen> {
+  GasStation? _selected;
+  late final MapController _mapController;
+
+  @override
+  void initState() {
+    super.initState();
+    _mapController = MapController();
+  }
+
+  // Cheapest station for highlight
+  double get _cheapestPrice => widget.stations
+      .where((s) => s.fuelPrices.regular != null)
+      .map((s) => s.fuelPrices.regular!)
+      .reduce(math.min);
+
+  void _onMarkerTap(GasStation station) {
+    setState(() => _selected = station);
+    _mapController.move(
+      LatLng(station.lat, station.lng),
+      15,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cheapest = _cheapestPrice;
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: Stack(
+        children: [
+          // ── Map ──────────────────────────────────────────────────────────
+          FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCenter: LatLng(widget.userLat, widget.userLng),
+              initialZoom: 13.5,
+              onTap: (_, __) => setState(() => _selected = null),
+            ),
+            children: [
+              // OpenStreetMap tiles — free, no API key
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.dashmateai.gasfinder',
+              ),
+
+              // Station markers
+              MarkerLayer(
+                markers: [
+                  // User location marker
+                  Marker(
+                    point: LatLng(widget.userLat, widget.userLng),
+                    width: 20,
+                    height: 20,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2196F3),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 3),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF2196F3).withOpacity(0.4),
+                            blurRadius: 8,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // Gas station markers
+                  ...widget.stations.map((station) {
+                    final isCheapest = station.fuelPrices.regular == cheapest;
+                    final isSelected = _selected?.id == station.id;
+                    return Marker(
+                      point: LatLng(station.lat, station.lng),
+                      width: isSelected ? 52 : 44,
+                      height: isSelected ? 52 : 44,
+                      child: GestureDetector(
+                        onTap: () => _onMarkerTap(station),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? const Color(0xFF1565C0)
+                                : isCheapest
+                                    ? const Color(0xFF2196F3)
+                                    : Colors.white,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isSelected
+                                  ? const Color(0xFF1565C0)
+                                  : isCheapest
+                                      ? const Color(0xFF2196F3)
+                                      : Colors.grey.shade300,
+                              width: 2,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.15),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Center(
+                            child: Icon(
+                              Icons.local_gas_station,
+                              size: isSelected ? 24 : 20,
+                              color: isSelected || isCheapest
+                                  ? Colors.white
+                                  : const Color(0xFF2196F3),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+                ],
+              ),
+            ],
+          ),
+
+          // ── App bar overlay ───────────────────────────────────────────────
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                child: Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () => Navigator.of(context).pop(),
+                      child: Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.12),
+                              blurRadius: 8,
+                            ),
+                          ],
+                        ),
+                        child: const Icon(Icons.arrow_back,
+                            size: 18, color: Color(0xFF1A1A2E)),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.08),
+                              blurRadius: 8,
+                            ),
+                          ],
+                        ),
+                        child: Text(
+                          '${widget.stations.length} stations nearby',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF1A1A2E),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // ── Popup card ────────────────────────────────────────────────────
+          if (_selected != null)
+            Positioned(
+              bottom: 24,
+              left: 16,
+              right: 16,
+              child: _MapPopupCard(
+                station: _selected!,
+                isCheapest: _selected!.fuelPrices.regular == cheapest,
+                userLat: widget.userLat,
+                userLng: widget.userLng,
+                onClose: () => setState(() => _selected = null),
+              ),
+            ),
+
+          // ── Legend ────────────────────────────────────────────────────────
+          if (_selected == null)
+            Positioned(
+              bottom: 24,
+              left: 16,
+              right: 16,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _LegendItem(
+                    color: const Color(0xFF2196F3),
+                    label: 'Cheapest',
+                    filled: true,
+                  ),
+                  const SizedBox(width: 16),
+                  _LegendItem(
+                    color: Colors.white,
+                    label: 'Other stations',
+                    filled: false,
+                  ),
+                  const SizedBox(width: 16),
+                  _LegendItem(
+                    color: const Color(0xFF2196F3),
+                    label: 'You',
+                    filled: true,
+                    isUser: true,
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Map Popup Card ────────────────────────────────────────────────────────────
+
+class _MapPopupCard extends StatelessWidget {
+  final GasStation station;
+  final bool isCheapest;
+  final double userLat;
+  final double userLng;
+  final VoidCallback onClose;
+
+  const _MapPopupCard({
+    required this.station,
+    required this.isCheapest,
+    required this.userLat,
+    required this.userLng,
+    required this.onClose,
+  });
+
+  Future<void> _openDirections() async {
+    final appleUrl = Uri.parse(
+      'https://maps.apple.com/?saddr=$userLat,$userLng&daddr=${station.lat},${station.lng}&dirflg=d&t=m',
+    );
+    final googleUrl = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&origin=$userLat,$userLng&destination=${station.lat},${station.lng}&travelmode=driving',
+    );
+    if (await canLaunchUrl(appleUrl)) {
+      await launchUrl(appleUrl, mode: LaunchMode.externalApplication);
+    } else {
+      await launchUrl(googleUrl, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: isCheapest
+            ? Border.all(color: const Color(0xFF2196F3), width: 1.5)
+            : null,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.12),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header: name + close
+            Row(
+              children: [
+                // Brand logo
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: station.brandColorValue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                        color: station.brandColorValue.withOpacity(0.25)),
+                  ),
+                  child: Center(
+                    child: Text(
+                      station.brand.isNotEmpty
+                          ? station.brand[0].toUpperCase()
+                          : '?',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        color: station.brandColorValue,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              station.name,
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF1A1A2E),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (isCheapest)
+                            Container(
+                              margin: const EdgeInsets.only(left: 6),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE3F2FD),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text(
+                                'Cheapest',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF1565C0),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Icon(Icons.near_me,
+                              size: 12, color: Colors.grey[400]),
+                          const SizedBox(width: 3),
+                          Text(
+                            '${station.distance.toStringAsFixed(2)} mi away',
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey[500]),
+                          ),
+                          if (station.rating != null) ...[
+                            const SizedBox(width: 8),
+                            const Icon(Icons.star,
+                                size: 12, color: Color(0xFFFFC107)),
+                            const SizedBox(width: 2),
+                            Text(
+                              station.rating!.toStringAsFixed(1),
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey[500]),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                GestureDetector(
+                  onTap: onClose,
+                  child: Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      shape: BoxShape.circle,
+                    ),
+                    child:
+                        Icon(Icons.close, size: 14, color: Colors.grey[600]),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+            const Divider(height: 1),
+            const SizedBox(height: 12),
+
+            // Prices + Directions
+            Row(
+              children: [
+                // Fuel prices
+                Expanded(
+                  child: Row(
+                    children: [
+                      _MapPricePill(
+                          label: '87',
+                          price: station.fuelPrices.regular,
+                          highlight: isCheapest),
+                      const SizedBox(width: 6),
+                      _MapPricePill(
+                          label: '89', price: station.fuelPrices.midgrade),
+                      const SizedBox(width: 6),
+                      _MapPricePill(
+                          label: '91', price: station.fuelPrices.premium),
+                    ],
+                  ),
+                ),
+                // Directions button
+                GestureDetector(
+                  onTap: _openDirections,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2196F3),
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF2196F3).withOpacity(0.3),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.directions, size: 14, color: Colors.white),
+                        SizedBox(width: 5),
+                        Text(
+                          'Go',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MapPricePill extends StatelessWidget {
+  final String label;
+  final double? price;
+  final bool highlight;
+
+  const _MapPricePill({
+    required this.label,
+    this.price,
+    this.highlight = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: highlight && price != null
+            ? const Color(0xFFE3F2FD)
+            : Colors.grey[100],
+        borderRadius: BorderRadius.circular(8),
+        border: highlight && price != null
+            ? Border.all(color: const Color(0xFF2196F3), width: 1)
+            : null,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label,
+              style: TextStyle(fontSize: 9, color: Colors.grey[500])),
+          Text(
+            price != null ? '\$${price!.toStringAsFixed(2)}' : '--',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: highlight && price != null
+                  ? const Color(0xFF1565C0)
+                  : const Color(0xFF1A1A2E),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Legend chip ────────────────────────────────────────────────────────────────
+
+class _LegendItem extends StatelessWidget {
+  final Color color;
+  final String label;
+  final bool filled;
+  final bool isUser;
+
+  const _LegendItem({
+    required this.color,
+    required this.label,
+    required this.filled,
+    this.isUser = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.08), blurRadius: 6),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 12,
+            height: 12,
+            decoration: BoxDecoration(
+              shape: isUser ? BoxShape.circle : BoxShape.circle,
+              color: filled ? color : Colors.white,
+              border: Border.all(color: color, width: 2),
+            ),
+          ),
+          const SizedBox(width: 5),
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF1A1A2E))),
         ],
       ),
     );

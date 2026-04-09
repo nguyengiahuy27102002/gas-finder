@@ -19,6 +19,10 @@ dependencies:
   # Open Maps for directions
   url_launcher: ^6.3.0
 
+  # Interactive map (works on web + mobile, no API key needed)
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+
   cupertino_icons: ^1.0.6
 
 dev_dependencies:
