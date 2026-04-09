@@ -16,6 +16,9 @@ dependencies:
   # HTTP calls to backend
   http: ^1.2.1
 
+  # Open Maps for directions
+  url_launcher: ^6.3.0
+
   cupertino_icons: ^1.0.6
 
 dev_dependencies:

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONFIG
@@ -837,25 +838,85 @@ class _StationCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                // Store price indicator
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.local_gas_station,
-                            size: 12, color: Colors.grey[400]),
-                        const SizedBox(width: 3),
-                        Text(
-                          'Store Price',
-                          style: TextStyle(
-                              fontSize: 11, color: Colors.grey[400]),
-                        ),
-                      ],
-                    ),
-                  ],
+                // Directions button
+                _DirectionsButton(
+                  lat: station.lat,
+                  lng: station.lng,
+                  name: station.name,
                 ),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DIRECTIONS BUTTON
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _DirectionsButton extends StatelessWidget {
+  final double lat;
+  final double lng;
+  final String name;
+
+  const _DirectionsButton({
+    required this.lat,
+    required this.lng,
+    required this.name,
+  });
+
+  Future<void> _openMaps() async {
+    // Apple Maps (works on iOS and macOS)
+    final appleUrl = Uri.parse(
+      'https://maps.apple.com/?daddr=$lat,$lng&dirflg=d&t=m',
+    );
+
+    // Google Maps fallback (Android, web, Windows)
+    final googleUrl = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving',
+    );
+
+    // Try Apple Maps first, fall back to Google Maps
+    if (await canLaunchUrl(appleUrl)) {
+      await launchUrl(appleUrl, mode: LaunchMode.externalApplication);
+    } else {
+      await launchUrl(googleUrl, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: _openMaps,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: const Color(0xFF2196F3),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF2196F3).withOpacity(0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.directions, size: 14, color: Colors.white),
+            SizedBox(width: 5),
+            Text(
+              'Directions',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+                letterSpacing: 0.2,
+              ),
             ),
           ],
         ),
