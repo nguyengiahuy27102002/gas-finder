@@ -1463,44 +1463,15 @@ class _GasStationMapScreenState extends State<GasStationMapScreen> {
                     final isSelected = _selected?.id == station.id;
                     return Marker(
                       point: LatLng(station.lat, station.lng),
-                      width: isSelected ? 52 : 44,
-                      height: isSelected ? 52 : 44,
+                      width: 72,
+                      height: 80,
+                      alignment: Alignment.topCenter,
                       child: GestureDetector(
                         onTap: () => _onMarkerTap(station),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          decoration: BoxDecoration(
-                            color: isSelected
-                                ? const Color(0xFF1565C0)
-                                : isCheapest
-                                    ? const Color(0xFF2196F3)
-                                    : Colors.white,
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: isSelected
-                                  ? const Color(0xFF1565C0)
-                                  : isCheapest
-                                      ? const Color(0xFF2196F3)
-                                      : Colors.grey.shade300,
-                              width: 2,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.15),
-                                blurRadius: 6,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Center(
-                            child: Icon(
-                              Icons.local_gas_station,
-                              size: isSelected ? 24 : 20,
-                              color: isSelected || isCheapest
-                                  ? Colors.white
-                                  : const Color(0xFF2196F3),
-                            ),
-                          ),
+                        child: _StationMapMarker(
+                          station: station,
+                          isCheapest: isCheapest,
+                          isSelected: isSelected,
                         ),
                       ),
                     );
@@ -1619,6 +1590,179 @@ class _GasStationMapScreenState extends State<GasStationMapScreen> {
       ),
     );
   }
+}
+
+// ── Station Map Marker (logo + price pill + pointer) ─────────────────────────
+
+class _StationMapMarker extends StatelessWidget {
+  final GasStation station;
+  final bool isCheapest;
+  final bool isSelected;
+
+  const _StationMapMarker({
+    required this.station,
+    required this.isCheapest,
+    required this.isSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final brandColor = station.brandColorValue;
+    final borderColor = isSelected
+        ? const Color(0xFF1565C0)
+        : isCheapest
+            ? const Color(0xFF2196F3)
+            : Colors.grey.shade300;
+    final initial = station.brand.isNotEmpty
+        ? station.brand[0].toUpperCase()
+        : station.name[0].toUpperCase();
+    final price = station.fuelPrices.regular;
+
+    return AnimatedScale(
+      scale: isSelected ? 1.12 : 1.0,
+      duration: const Duration(milliseconds: 180),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ── Card bubble ──────────────────────────────────────────────────
+          Container(
+            width: 72,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: borderColor, width: isSelected ? 2 : 1.5),
+              boxShadow: [
+                BoxShadow(
+                  color: isSelected
+                      ? const Color(0xFF2196F3).withOpacity(0.35)
+                      : Colors.black.withOpacity(0.14),
+                  blurRadius: isSelected ? 12 : 6,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Logo: real photo or brand initial
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: brandColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: brandColor.withOpacity(0.25)),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: station.logoUrl != null
+                      ? Image.network(
+                          station.logoUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) =>
+                              _Initial(initial: initial, color: brandColor),
+                        )
+                      : _Initial(initial: initial, color: brandColor),
+                ),
+                const SizedBox(height: 4),
+                // Price label
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: isCheapest
+                        ? const Color(0xFFE3F2FD)
+                        : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    price != null ? '\$${price.toStringAsFixed(2)}' : '--',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: isCheapest
+                          ? const Color(0xFF1565C0)
+                          : const Color(0xFF1A1A2E),
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // ── Downward pointer ─────────────────────────────────────────────
+          CustomPaint(
+            size: const Size(14, 8),
+            painter: _PointerPainter(
+              color: Colors.white,
+              borderColor: borderColor,
+              borderWidth: isSelected ? 2 : 1.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Initial extends StatelessWidget {
+  final String initial;
+  final Color color;
+  const _Initial({required this.initial, required this.color});
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Text(
+          initial,
+          style: TextStyle(
+              fontSize: 16, fontWeight: FontWeight.w900, color: color),
+        ),
+      );
+}
+
+/// Draws a downward-pointing triangle that looks like a map pin tip.
+class _PointerPainter extends CustomPainter {
+  final Color color;
+  final Color borderColor;
+  final double borderWidth;
+
+  const _PointerPainter({
+    required this.color,
+    required this.borderColor,
+    required this.borderWidth,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final borderPaint = Paint()
+      ..color = borderColor
+      ..style = PaintingStyle.fill;
+    final fillPaint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    // Border triangle (slightly larger)
+    final borderPath = Path()
+      ..moveTo(0, 0)
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width / 2, size.height)
+      ..close();
+    canvas.drawPath(borderPath, borderPaint);
+
+    // White fill triangle (inset by border width)
+    final inset = borderWidth * 0.7;
+    final fillPath = Path()
+      ..moveTo(inset, 0)
+      ..lineTo(size.width - inset, 0)
+      ..lineTo(size.width / 2, size.height - inset)
+      ..close();
+    canvas.drawPath(fillPath, fillPaint);
+  }
+
+  @override
+  bool shouldRepaint(_PointerPainter old) =>
+      old.color != color ||
+      old.borderColor != borderColor ||
+      old.borderWidth != borderWidth;
 }
 
 // ── Map Popup Card ────────────────────────────────────────────────────────────
