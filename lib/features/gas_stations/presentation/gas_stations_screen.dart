@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
@@ -1741,7 +1742,7 @@ class _PointerPainter extends CustomPainter {
       ..style = PaintingStyle.fill;
 
     // Border triangle (slightly larger)
-    final borderPath = Path()
+    final borderPath = ui.Path()
       ..moveTo(0, 0)
       ..lineTo(size.width, 0)
       ..lineTo(size.width / 2, size.height)
@@ -1750,7 +1751,7 @@ class _PointerPainter extends CustomPainter {
 
     // White fill triangle (inset by border width)
     final inset = borderWidth * 0.7;
-    final fillPath = Path()
+    final fillPath = ui.Path()
       ..moveTo(inset, 0)
       ..lineTo(size.width - inset, 0)
       ..lineTo(size.width / 2, size.height - inset)
